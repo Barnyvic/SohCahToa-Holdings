@@ -5,12 +5,12 @@ services:
       dockerfile: Dockerfile
     container_name: wallet-api
     ports:
-      - "3000:3000"
+      - "${PORT:-4566}:${PORT:-4566}"
     env_file:
       - .env
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      PORT: ${PORT:-3000}
+      PORT: ${PORT:-4566}
       DB_HOST: ${DB_HOST:-mysql}
       DB_PORT: ${DB_PORT:-3306}
       DB_USERNAME: ${DB_USERNAME:-root}
