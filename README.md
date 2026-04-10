@@ -4,7 +4,7 @@
 - NestJS, TypeORM, MySQL, class-validator
 - JWT access + refresh tokens
 - TypeORM migrations
-- Optional Redis distributed lock
+- Redis distributed lock
 - Swagger at `/docs`
 
 ## Architecture
@@ -63,7 +63,7 @@ npm run start:dev
 ## Race Condition Prevention
 - DB transaction (`QueryRunner`) for write path
 - Wallet row locked with pessimistic write (`FOR UPDATE`)
-- Optional Redis lock (`wallet-lock:{userId}`) adds cross-node safety
+- Redis lock (`wallet-lock:{userId}`) adds cross-node safety
 - Two debits against balance `150` for `100` => one success, one failed
 
 ## Injection Prevention
@@ -89,7 +89,7 @@ npm run start:dev
 - Redis for distributed locking and caching
 - MySQL tuning: connection pooling, indexes, partitioning by date/wallet
 - Read replicas for query-heavy endpoints
-- Async offload non-critical audit/analytics to queues
+- Asynchronous transfer processing and offloading non-critical audit/analytics to queues
 
 ## Tests
 ```bash

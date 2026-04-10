@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
@@ -6,19 +14,7 @@ import type { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { WalletTransaction } from './transaction.entity';
 import { TransactionsService } from './transactions.service';
-
-type TransactionResponse = {
-  id: string;
-  reference: string;
-  walletId: string;
-  type: WalletTransaction['type'];
-  amount: string;
-  balanceBefore: string;
-  balanceAfter: string;
-  status: WalletTransaction['status'];
-  idempotencyKey: string;
-  createdAt: Date;
-};
+import type { TransactionResponse } from './types/transaction-response.type';
 
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -31,13 +27,36 @@ export class TransactionsController {
     @Query('page') page = '1',
     @Query('limit') limit = '20',
   ): Promise<TransactionResponse[]> {
+    const parsedPage = this.parsePositiveInt(page, 'page', 1);
+    const parsedLimit = this.parsePositiveInt(limit, 'limit', 20, 100);
+
     return this.transactionsService
-      .listForUser(user, Number(page), Number(limit))
+      .listForUser(user, parsedPage, parsedLimit)
       .then((transactions) =>
         transactions.map((transaction) =>
           this.toTransactionResponse(transaction),
         ),
       );
+  }
+
+  private parsePositiveInt(
+    raw: string,
+    field: 'page' | 'limit',
+    fallback: number,
+    max?: number,
+  ): number {
+    if (!raw) {
+      return fallback;
+    }
+
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1) {
+      throw new BadRequestException(`${field} must be a positive integer`);
+    }
+    if (typeof max === 'number' && value > max) {
+      throw new BadRequestException(`${field} must be <= ${max}`);
+    }
+    return value;
   }
 
   private toTransactionResponse(

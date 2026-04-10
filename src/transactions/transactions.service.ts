@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditLogService } from '../audit-log/audit-log.service';
@@ -132,6 +133,14 @@ export class TransactionsService {
       if (queryRunner.isTransactionActive) {
         await queryRunner.rollbackTransaction();
       }
+      if (this.isDuplicateIdempotencyError(error)) {
+        const existing = await this.transactionRepository.findOne({
+          where: { idempotencyKey: dto.idempotencyKey },
+        });
+        if (existing) {
+          return existing;
+        }
+      }
       throw error;
     } finally {
       if (!queryRunner.isReleased) {
@@ -142,6 +151,18 @@ export class TransactionsService {
   }
 
   private generateReference(): string {
-    return `tx_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    return `tx_${randomUUID().replace(/-/g, '')}`;
+  }
+
+  private isDuplicateIdempotencyError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const errorWithCode = error as { code?: string; message?: string };
+    return (
+      errorWithCode.code === 'ER_DUP_ENTRY' &&
+      (errorWithCode.message?.includes('idempotency_key') ?? false)
+    );
   }
 }
