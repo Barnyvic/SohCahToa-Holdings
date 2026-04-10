@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -19,6 +20,7 @@ import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private readonly accessSecret: string;
   private readonly refreshSecret: string;
   private readonly accessTtl: string;
@@ -40,8 +42,10 @@ export class AuthService {
   async register(
     dto: RegisterDto,
   ): Promise<{ accessToken: string; refreshToken: string }> {
+    this.logger.log(`Register attempt for email=${dto.email}`);
     const existing = await this.usersRepository.findByEmail(dto.email);
     if (existing) {
+      this.logger.warn(`Register blocked: email exists email=${dto.email}`);
       throw new ConflictException('Email already exists');
     }
 
@@ -62,18 +66,27 @@ export class AuthService {
       await manager.save(Wallet, wallet);
       return savedUser;
     });
+    this.logger.log(`User registered userId=${user.id}`);
     return this.generateTokenPair(user);
   }
 
   async login(
     dto: LoginDto,
   ): Promise<{ accessToken: string; refreshToken: string }> {
+    this.logger.log(`Login attempt for email=${dto.email}`);
     const user = await this.usersRepository.findByEmail(dto.email);
-    if (!user) throw new UnauthorizedException('Invalid credentials');
+    if (!user) {
+      this.logger.warn(`Login failed: user not found email=${dto.email}`);
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     const matches = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!matches) throw new UnauthorizedException('Invalid credentials');
+    if (!matches) {
+      this.logger.warn(`Login failed: bad credentials email=${dto.email}`);
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
+    this.logger.log(`Login successful userId=${user.id}`);
     return this.generateTokenPair(user);
   }
 
@@ -86,11 +99,17 @@ export class AuthService {
         secret: this.refreshSecret,
       },
     );
-    if (payload.tokenType !== 'refresh')
+    if (payload.tokenType !== 'refresh') {
+      this.logger.warn(`Refresh failed: tokenType mismatch sub=${payload.sub}`);
       throw new UnauthorizedException('Invalid refresh token');
+    }
 
     const user = await this.usersRepository.findById(payload.sub);
-    if (!user) throw new UnauthorizedException('Invalid refresh token');
+    if (!user) {
+      this.logger.warn(`Refresh failed: user not found sub=${payload.sub}`);
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+    this.logger.log(`Refresh successful userId=${user.id}`);
     return this.generateTokenPair(user);
   }
 

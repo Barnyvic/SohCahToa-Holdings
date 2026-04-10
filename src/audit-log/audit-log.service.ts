@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AuditAction } from './audit-actions.enum';
@@ -6,6 +6,8 @@ import { AuditLog } from './audit-log.entity';
 
 @Injectable()
 export class AuditLogService {
+  private readonly logger = new Logger(AuditLogService.name);
+
   constructor(
     @InjectRepository(AuditLog)
     private readonly auditLogRepository: Repository<AuditLog>,
@@ -18,6 +20,9 @@ export class AuditLogService {
   ): Promise<void> {
     await this.auditLogRepository.save(
       this.auditLogRepository.create({ action, actorUserId, metadata }),
+    );
+    this.logger.debug(
+      `Audit log saved action=${action} actorUserId=${actorUserId ?? 'system'}`,
     );
   }
 }

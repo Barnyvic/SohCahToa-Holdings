@@ -50,6 +50,9 @@ export class TransactionsService {
     dto: CreateTransactionDto,
     user: JwtPayload,
   ): Promise<WalletTransaction> {
+    this.logger.log(
+      `Create transaction request userId=${user.sub} type=${dto.type} idempotencyKey=${dto.idempotencyKey}`,
+    );
     const walletRow: Pick<Wallet, 'id'> | null = await this.dataSource
       .getRepository(Wallet)
       .findOne({
@@ -75,7 +78,13 @@ export class TransactionsService {
           dto.idempotencyKey,
         );
       if (existing) {
+        this.logger.log(
+          `Returning existing transaction for idempotencyKey=${dto.idempotencyKey}`,
+        );
         if (this.isInsufficientFundsFailure(existing)) {
+          this.logger.warn(
+            `Idempotent insufficient balance idempotencyKey=${dto.idempotencyKey}`,
+          );
           throw new BadRequestException('Insufficient balance');
         }
         audit = {
@@ -110,6 +119,9 @@ export class TransactionsService {
         dto.type === TransactionType.DEBIT &&
         !this.moneyService.gte(wallet.balance, amount)
       ) {
+        this.logger.warn(
+          `Insufficient balance userId=${user.sub} walletId=${wallet.id} amount=${amount} balance=${wallet.balance}`,
+        );
         throw new BadRequestException('Insufficient balance');
       }
 
@@ -151,6 +163,9 @@ export class TransactionsService {
       };
 
       await queryRunner.commitTransaction();
+      this.logger.log(
+        `Transaction committed transactionId=${savedTx.id} walletId=${wallet.id} status=${savedTx.status}`,
+      );
       this.auditAfterCommit(audit);
       return savedTx;
     } catch (error: unknown) {
@@ -162,6 +177,9 @@ export class TransactionsService {
           dto.idempotencyKey,
         );
         if (existing) {
+          this.logger.warn(
+            `Duplicate idempotency key detected idempotencyKey=${dto.idempotencyKey}`,
+          );
           if (this.isInsufficientFundsFailure(existing)) {
             throw new BadRequestException('Insufficient balance');
           }
