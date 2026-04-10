@@ -12,7 +12,7 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: ${PORT:-4566}
       DB_HOST: ${DB_HOST:-mysql}
-      DB_PORT: ${DB_PORT:-3306}
+      DB_PORT: 3306
       DB_USERNAME: ${DB_USERNAME:-root}
       DB_PASSWORD: ${DB_PASSWORD:-root}
       DB_DATABASE: ${DB_DATABASE:-wallet_api}
