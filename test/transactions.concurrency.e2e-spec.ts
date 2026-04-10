@@ -63,11 +63,11 @@ describeDbIntegration('Transactions concurrency (db integration)', () => {
 
   it('one of two parallel debits should fail from 150 balance', async () => {
     const debitA = request(server)
-      .post('/transactions')
+      .post('/v1/transactions')
       .set('Authorization', `Bearer ${authToken}`)
       .send({ amount: 100, type: 'debit', idempotencyKey: 'parallel-a' });
     const debitB = request(server)
-      .post('/transactions')
+      .post('/v1/transactions')
       .set('Authorization', `Bearer ${authToken}`)
       .send({ amount: 100, type: 'debit', idempotencyKey: 'parallel-b' });
 

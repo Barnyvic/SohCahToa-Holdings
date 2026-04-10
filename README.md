@@ -5,7 +5,7 @@
 - JWT access + refresh tokens
 - TypeORM migrations
 - Redis distributed lock
-- Swagger at `/docs`
+- Swagger at `/docs` (versioned endpoints under `/v1`)
 
 ## Architecture
 This project is a **Modular Monolith with Clean Layering**:
@@ -59,13 +59,13 @@ npm run start:dev
 ```
 
 ## Endpoints
-- `POST /auth/register`
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `GET /wallet`
-- `GET /wallet/:userId` (admin only)
-- `GET /transactions?page=1&limit=20` (returns `{ data, total, page, limit }`)
-- `POST /transactions`
+- `POST /v1/auth/register`
+- `POST /v1/auth/login`
+- `POST /v1/auth/refresh`
+- `GET /v1/wallet`
+- `GET /v1/wallet/:userId` (admin only)
+- `GET /v1/transactions?page=1&limit=20` (returns `{ data, total, page, limit }`)
+- `POST /v1/transactions`
 
 ## Idempotency Strategy
 - `transactions.idempotency_key` is unique

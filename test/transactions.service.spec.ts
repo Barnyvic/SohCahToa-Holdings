@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getDataSourceToken } from '@nestjs/typeorm';
 import { AuditLogService } from '../src/audit-log/audit-log.service';
@@ -91,7 +91,7 @@ describe('TransactionsService', () => {
     expect(result).toEqual(existing);
   });
 
-  it('prevents negative balance on debit', async () => {
+  it('returns insufficient balance error on debit', async () => {
     const wallet = { id: 'w1', balance: '50.00' } as Wallet;
     const manager = {
       findOne: jest.fn().mockResolvedValue(null),
@@ -135,11 +135,12 @@ describe('TransactionsService', () => {
     }).compile();
 
     const service = moduleRef.get(TransactionsService);
-    const result = await service.create(
-      { amount: 100, type: TransactionType.DEBIT, idempotencyKey: 'idem-2' },
-      user,
-    );
-    expect(result.status).toBe('failed');
+    await expect(
+      service.create(
+        { amount: 100, type: TransactionType.DEBIT, idempotencyKey: 'idem-2' },
+        user,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('throws if wallet is missing', async () => {

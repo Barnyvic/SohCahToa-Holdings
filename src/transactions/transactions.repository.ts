@@ -16,10 +16,10 @@ export class TransactionsRepository {
     limit: number,
   ): Promise<{ data: WalletTransaction[]; total: number }> {
     const [data, total] = await this.transactionOrmRepository
-      .createQueryBuilder('transaction')
-      .innerJoin('transaction.wallet', 'wallet')
+      .createQueryBuilder('tx')
+      .innerJoin('tx.wallet', 'wallet')
       .where('wallet.user_id = :userId', { userId })
-      .orderBy('transaction.created_at', 'DESC')
+      .orderBy('tx.createdAt', 'DESC')
       .skip((page - 1) * limit)
       .take(limit)
       .getManyAndCount();

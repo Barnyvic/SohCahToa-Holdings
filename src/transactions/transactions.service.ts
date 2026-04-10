@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -70,6 +75,9 @@ export class TransactionsService {
           dto.idempotencyKey,
         );
       if (existing) {
+        if (this.isInsufficientFundsFailure(existing)) {
+          throw new BadRequestException('Insufficient balance');
+        }
         audit = {
           action: AuditAction.TRANSACTION_DUPLICATE,
           actorUserId: user.sub,
@@ -102,29 +110,7 @@ export class TransactionsService {
         dto.type === TransactionType.DEBIT &&
         !this.moneyService.gte(wallet.balance, amount)
       ) {
-        const failed = manager.create(WalletTransaction, {
-          walletId: wallet.id,
-          type: dto.type,
-          amount,
-          balanceBefore,
-          balanceAfter: balanceBefore,
-          reference: this.generateReference(),
-          status: TransactionStatus.FAILED,
-          idempotencyKey: dto.idempotencyKey,
-        });
-        const failedTx = await manager.save(WalletTransaction, failed);
-        audit = {
-          action: AuditAction.TRANSACTION_DEBIT_FAILED,
-          actorUserId: user.sub,
-          metadata: {
-            transactionId: failedTx.id,
-            walletId: wallet.id,
-            idempotencyKey: dto.idempotencyKey,
-          },
-        };
-        await queryRunner.commitTransaction();
-        this.auditAfterCommit(audit);
-        return failedTx;
+        throw new BadRequestException('Insufficient balance');
       }
 
       const newBalance =
@@ -176,6 +162,9 @@ export class TransactionsService {
           dto.idempotencyKey,
         );
         if (existing) {
+          if (this.isInsufficientFundsFailure(existing)) {
+            throw new BadRequestException('Insufficient balance');
+          }
           this.auditAfterCommit({
             action: AuditAction.TRANSACTION_DUPLICATE,
             actorUserId: user.sub,
@@ -220,6 +209,14 @@ export class TransactionsService {
       .catch((err: unknown) => {
         this.logger.error(`Audit log failed: ${this.formatError(err)}`);
       });
+  }
+
+  private isInsufficientFundsFailure(existing: WalletTransaction): boolean {
+    return (
+      existing.type === TransactionType.DEBIT &&
+      existing.status === TransactionStatus.FAILED &&
+      existing.balanceBefore === existing.balanceAfter
+    );
   }
 
   private formatError(err: unknown): string {

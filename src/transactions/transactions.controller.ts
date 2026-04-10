@@ -7,22 +7,38 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOkResponse,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import type { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
+import { PaginatedTransactionsResponseDto } from './dto/paginated-transactions-response.dto';
+import { TransactionResponseDto } from './dto/transaction-response.dto';
 import { WalletTransaction } from './transaction.entity';
 import { TransactionsService } from './transactions.service';
 import type { TransactionResponse } from './types/transaction-response.type';
 import type { PaginatedTransactionsResponse } from './types/paginated-transactions-response.type';
 
+@ApiTags('Transactions')
+@ApiBearerAuth()
 @Controller()
 @UseGuards(JwtAuthGuard)
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
 
   @Get('transactions')
+  @ApiOperation({ summary: 'List current user transactions (paginated)' })
+  @ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, type: Number, example: 20 })
+  @ApiOkResponse({ type: PaginatedTransactionsResponseDto })
   getTransactions(
     @CurrentUser() user: JwtPayload,
     @Query('page') page = '1',
@@ -83,6 +99,9 @@ export class TransactionsController {
   @UseGuards(ThrottlerGuard)
   @Throttle({ default: { ttl: 60_000, limit: 10 } })
   @Post('transactions')
+  @ApiOperation({ summary: 'Create a wallet transaction' })
+  @ApiBody({ type: CreateTransactionDto })
+  @ApiOkResponse({ type: TransactionResponseDto })
   async createTransaction(
     @Body() dto: CreateTransactionDto,
     @CurrentUser() user: JwtPayload,

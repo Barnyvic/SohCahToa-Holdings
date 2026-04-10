@@ -31,7 +31,7 @@ services:
     container_name: wallet-mysql
     command: ["--default-authentication-plugin=mysql_native_password"]
     ports:
-      - "3306:3306"
+      - "${MYSQL_HOST_PORT:-3306}:3306"
     env_file:
       - .env
     environment:
