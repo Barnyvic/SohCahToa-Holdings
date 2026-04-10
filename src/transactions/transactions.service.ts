@@ -1,11 +1,8 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { AuditAction } from '../audit-log/audit-actions.enum';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { DistributedLockService } from '../locks/distributed-lock.service';
@@ -14,13 +11,19 @@ import { Wallet } from '../wallet/wallet.entity';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { TransactionStatus } from './enums/transaction-status.enum';
 import { TransactionType } from './enums/transaction-type.enum';
+import { TransactionsRepository } from './transactions.repository';
 import { WalletTransaction } from './transaction.entity';
+import type {
+  AuditAfterCommitPayload,
+  PaginatedWalletTransactions,
+} from './types/transactions-service.types';
 
 @Injectable()
 export class TransactionsService {
+  private readonly logger = new Logger(TransactionsService.name);
+
   constructor(
-    @InjectRepository(WalletTransaction)
-    private readonly transactionRepository: Repository<WalletTransaction>,
+    private readonly transactionsRepository: TransactionsRepository,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly moneyService: MoneyService,
     private readonly distributedLockService: DistributedLockService,
@@ -31,41 +34,62 @@ export class TransactionsService {
     user: JwtPayload,
     page: number,
     limit: number,
-  ): Promise<WalletTransaction[]> {
-    return this.transactionRepository
-      .createQueryBuilder('transaction')
-      .innerJoin('transaction.wallet', 'wallet')
-      .where('wallet.user_id = :userId', { userId: user.sub })
-      .orderBy('transaction.created_at', 'DESC')
-      .skip((page - 1) * limit)
-      .take(limit)
-      .getMany();
+  ): Promise<PaginatedWalletTransactions> {
+    const { data, total }: { data: WalletTransaction[]; total: number } =
+      await this.transactionsRepository.listForUser(user.sub, page, limit);
+    const result: PaginatedWalletTransactions = { data, total, page, limit };
+    return result;
   }
 
   async create(
     dto: CreateTransactionDto,
     user: JwtPayload,
   ): Promise<WalletTransaction> {
-    const lockKey = `wallet-lock:${user.sub}`;
+    const walletRow: Pick<Wallet, 'id'> | null = await this.dataSource
+      .getRepository(Wallet)
+      .findOne({
+        where: { userId: user.sub },
+        select: { id: true },
+      });
+    const walletId = walletRow?.id ?? null;
+    if (!walletId) throw new NotFoundException('Wallet not found');
+
+    const lockKey = `wallet-lock:${walletId}`;
     const lockValue = await this.distributedLockService.acquire(lockKey);
     const queryRunner = this.dataSource.createQueryRunner();
+    let audit: AuditAfterCommitPayload | null = null;
 
     try {
       await queryRunner.connect();
       await queryRunner.startTransaction();
       const manager = queryRunner.manager;
 
-      const existing = await manager.findOne(WalletTransaction, {
-        where: { idempotencyKey: dto.idempotencyKey },
-      });
+      const existing =
+        await this.transactionsRepository.findByIdempotencyKeyWithManager(
+          manager,
+          dto.idempotencyKey,
+        );
       if (existing) {
+        audit = {
+          action: AuditAction.TRANSACTION_DUPLICATE,
+          actorUserId: user.sub,
+          metadata: {
+            transactionId: existing.id,
+            walletId: existing.walletId,
+            idempotencyKey: dto.idempotencyKey,
+          },
+        };
         await queryRunner.commitTransaction();
+        this.auditAfterCommit(audit);
         return existing;
       }
 
       const wallet = await manager
         .createQueryBuilder(Wallet, 'wallet')
-        .where('wallet.user_id = :userId', { userId: user.sub })
+        .where('wallet.id = :walletId AND wallet.user_id = :userId', {
+          walletId,
+          userId: user.sub,
+        })
         .setLock('pessimistic_write')
         .getOne();
 
@@ -89,19 +113,31 @@ export class TransactionsService {
           idempotencyKey: dto.idempotencyKey,
         });
         const failedTx = await manager.save(WalletTransaction, failed);
+        audit = {
+          action: AuditAction.TRANSACTION_DEBIT_FAILED,
+          actorUserId: user.sub,
+          metadata: {
+            transactionId: failedTx.id,
+            walletId: wallet.id,
+            idempotencyKey: dto.idempotencyKey,
+          },
+        };
         await queryRunner.commitTransaction();
+        this.auditAfterCommit(audit);
         return failedTx;
       }
+
+      const newBalance =
+        dto.type === TransactionType.CREDIT
+          ? this.moneyService.add(balanceBefore, amount)
+          : this.moneyService.subtract(balanceBefore, amount);
 
       const transaction = manager.create(WalletTransaction, {
         walletId: wallet.id,
         type: dto.type,
         amount,
         balanceBefore,
-        balanceAfter:
-          dto.type === TransactionType.CREDIT
-            ? this.moneyService.add(balanceBefore, amount)
-            : this.moneyService.subtract(balanceBefore, amount),
+        balanceAfter: newBalance,
         reference: this.generateReference(),
         status: TransactionStatus.PENDING,
         idempotencyKey: dto.idempotencyKey,
@@ -109,35 +145,46 @@ export class TransactionsService {
 
       const savedTx = await manager.save(WalletTransaction, transaction);
 
-      wallet.balance =
-        dto.type === TransactionType.CREDIT
-          ? this.moneyService.add(wallet.balance, amount)
-          : this.moneyService.subtract(wallet.balance, amount);
-
-      if (this.moneyService.from(wallet.balance).isNegative()) {
-        throw new BadRequestException('Wallet balance cannot be negative');
-      }
+      wallet.balance = newBalance;
 
       await manager.save(Wallet, wallet);
       savedTx.status = TransactionStatus.SUCCESS;
       await manager.save(WalletTransaction, savedTx);
 
-      await this.auditLogService.create('transaction.created', user.sub, {
-        transactionId: savedTx.id,
-        walletId: wallet.id,
-      });
+      audit = {
+        action:
+          dto.type === TransactionType.CREDIT
+            ? AuditAction.TRANSACTION_CREDIT_SUCCESS
+            : AuditAction.TRANSACTION_DEBIT_SUCCESS,
+        actorUserId: user.sub,
+        metadata: {
+          transactionId: savedTx.id,
+          walletId: wallet.id,
+          idempotencyKey: dto.idempotencyKey,
+        },
+      };
 
       await queryRunner.commitTransaction();
+      this.auditAfterCommit(audit);
       return savedTx;
     } catch (error: unknown) {
       if (queryRunner.isTransactionActive) {
         await queryRunner.rollbackTransaction();
       }
       if (this.isDuplicateIdempotencyError(error)) {
-        const existing = await this.transactionRepository.findOne({
-          where: { idempotencyKey: dto.idempotencyKey },
-        });
+        const existing = await this.transactionsRepository.findByIdempotencyKey(
+          dto.idempotencyKey,
+        );
         if (existing) {
+          this.auditAfterCommit({
+            action: AuditAction.TRANSACTION_DUPLICATE,
+            actorUserId: user.sub,
+            metadata: {
+              transactionId: existing.id,
+              walletId: existing.walletId,
+              idempotencyKey: dto.idempotencyKey,
+            },
+          });
           return existing;
         }
       }
@@ -151,7 +198,7 @@ export class TransactionsService {
   }
 
   private generateReference(): string {
-    return `tx_${randomUUID().replace(/-/g, '')}`;
+    return `TXN-${randomUUID()}`;
   }
 
   private isDuplicateIdempotencyError(error: unknown): boolean {
@@ -164,5 +211,25 @@ export class TransactionsService {
       errorWithCode.code === 'ER_DUP_ENTRY' &&
       (errorWithCode.message?.includes('idempotency_key') ?? false)
     );
+  }
+
+  private auditAfterCommit(audit: AuditAfterCommitPayload | null): void {
+    if (!audit) return;
+    this.auditLogService
+      .create(audit.action, audit.actorUserId, audit.metadata)
+      .catch((err: unknown) => {
+        this.logger.error(`Audit log failed: ${this.formatError(err)}`);
+      });
+  }
+
+  private formatError(err: unknown): string {
+    if (err instanceof Error) {
+      return `${err.name}: ${err.message}`;
+    }
+    try {
+      return JSON.stringify(err);
+    } catch {
+      return String(err);
+    }
   }
 }

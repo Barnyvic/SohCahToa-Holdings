@@ -6,6 +6,7 @@ import { MoneyService } from '../utils/money/money.service';
 import { Wallet } from '../wallet/wallet.entity';
 import { WalletTransaction } from './transaction.entity';
 import { TransactionsController } from './transactions.controller';
+import { TransactionsRepository } from './transactions.repository';
 import { TransactionsService } from './transactions.service';
 
 @Module({
@@ -14,7 +15,12 @@ import { TransactionsService } from './transactions.service';
     AuditLogModule,
   ],
   controllers: [TransactionsController],
-  providers: [TransactionsService, MoneyService, DistributedLockService],
+  providers: [
+    TransactionsRepository,
+    TransactionsService,
+    MoneyService,
+    DistributedLockService,
+  ],
   exports: [TransactionsService],
 })
 export class TransactionsModule {}

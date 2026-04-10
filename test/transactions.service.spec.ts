@@ -1,11 +1,12 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { getDataSourceToken, getRepositoryToken } from '@nestjs/typeorm';
+import { getDataSourceToken } from '@nestjs/typeorm';
 import { AuditLogService } from '../src/audit-log/audit-log.service';
 import { UserRole } from '../src/common/enums/user-role.enum';
 import { JwtPayload } from '../src/common/interfaces/jwt-payload.interface';
 import { DistributedLockService } from '../src/locks/distributed-lock.service';
 import { TransactionType } from '../src/transactions/enums/transaction-type.enum';
+import { TransactionsRepository } from '../src/transactions/transactions.repository';
 import { WalletTransaction } from '../src/transactions/transaction.entity';
 import { TransactionsService } from '../src/transactions/transactions.service';
 import { MoneyService } from '../src/utils/money/money.service';
@@ -32,6 +33,19 @@ describe('TransactionsService', () => {
       isReleased: false,
       manager,
     }),
+    getRepository: () => ({
+      findOne: jest.fn().mockResolvedValue({ id: 'w1' }),
+    }),
+  });
+
+  const makeTransactionsRepository = (manager: {
+    findOne: () => Promise<WalletTransaction | null>;
+  }): Partial<TransactionsRepository> => ({
+    listForUser: jest.fn().mockResolvedValue([]),
+    findByIdempotencyKeyWithManager: jest
+      .fn()
+      .mockImplementation(() => manager.findOne()),
+    findByIdempotencyKey: jest.fn().mockResolvedValue(null),
   });
 
   it('returns existing tx on duplicate idempotency key', async () => {
@@ -48,8 +62,8 @@ describe('TransactionsService', () => {
         TransactionsService,
         MoneyService,
         {
-          provide: getRepositoryToken(WalletTransaction),
-          useValue: { createQueryBuilder: jest.fn() },
+          provide: TransactionsRepository,
+          useValue: makeTransactionsRepository(manager),
         },
         {
           provide: getDataSourceToken(),
@@ -99,8 +113,8 @@ describe('TransactionsService', () => {
         TransactionsService,
         MoneyService,
         {
-          provide: getRepositoryToken(WalletTransaction),
-          useValue: { createQueryBuilder: jest.fn() },
+          provide: TransactionsRepository,
+          useValue: makeTransactionsRepository(manager),
         },
         {
           provide: getDataSourceToken(),
@@ -131,11 +145,6 @@ describe('TransactionsService', () => {
   it('throws if wallet is missing', async () => {
     const manager = {
       findOne: jest.fn().mockResolvedValue(null),
-      createQueryBuilder: jest.fn().mockReturnValue({
-        where: jest.fn().mockReturnThis(),
-        setLock: jest.fn().mockReturnThis(),
-        getOne: jest.fn().mockResolvedValue(null),
-      }),
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -143,12 +152,17 @@ describe('TransactionsService', () => {
         TransactionsService,
         MoneyService,
         {
-          provide: getRepositoryToken(WalletTransaction),
-          useValue: { createQueryBuilder: jest.fn() },
+          provide: TransactionsRepository,
+          useValue: makeTransactionsRepository(manager),
         },
         {
           provide: getDataSourceToken(),
-          useValue: makeDataSource(manager),
+          useValue: {
+            ...makeDataSource(manager),
+            getRepository: () => ({
+              findOne: jest.fn().mockResolvedValue(null),
+            }),
+          },
         },
         {
           provide: DistributedLockService,

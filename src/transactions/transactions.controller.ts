@@ -15,6 +15,7 @@ import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { WalletTransaction } from './transaction.entity';
 import { TransactionsService } from './transactions.service';
 import type { TransactionResponse } from './types/transaction-response.type';
+import type { PaginatedTransactionsResponse } from './types/paginated-transactions-response.type';
 
 @Controller()
 @UseGuards(JwtAuthGuard)
@@ -26,17 +27,20 @@ export class TransactionsController {
     @CurrentUser() user: JwtPayload,
     @Query('page') page = '1',
     @Query('limit') limit = '20',
-  ): Promise<TransactionResponse[]> {
+  ): Promise<PaginatedTransactionsResponse> {
     const parsedPage = this.parsePositiveInt(page, 'page', 1);
     const parsedLimit = this.parsePositiveInt(limit, 'limit', 20, 100);
 
     return this.transactionsService
       .listForUser(user, parsedPage, parsedLimit)
-      .then((transactions) =>
-        transactions.map((transaction) =>
+      .then(({ data, total, page: currentPage, limit: currentLimit }) => ({
+        data: data.map((transaction) =>
           this.toTransactionResponse(transaction),
         ),
-      );
+        total,
+        page: currentPage,
+        limit: currentLimit,
+      }));
   }
 
   private parsePositiveInt(

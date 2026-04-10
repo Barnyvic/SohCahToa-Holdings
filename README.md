@@ -33,6 +33,20 @@ npm install
 cp .env.example .env
 ```
 
+## Docker (Optional but Recommended)
+```bash
+docker compose up --build -d
+```
+
+Then run migrations inside the app container:
+```bash
+docker compose exec app npm run migration:run
+```
+
+API will be available at:
+- `http://localhost:3000`
+- Swagger: `http://localhost:3000/docs`
+
 ## Migration Commands
 ```bash
 npm run build
@@ -50,7 +64,7 @@ npm run start:dev
 - `POST /auth/refresh`
 - `GET /wallet`
 - `GET /wallet/:userId` (admin only)
-- `GET /transactions?page=1&limit=20`
+- `GET /transactions?page=1&limit=20` (returns `{ data, total, page, limit }`)
 - `POST /transactions`
 
 ## Idempotency Strategy
@@ -63,8 +77,16 @@ npm run start:dev
 ## Race Condition Prevention
 - DB transaction (`QueryRunner`) for write path
 - Wallet row locked with pessimistic write (`FOR UPDATE`)
-- Redis lock (`wallet-lock:{userId}`) adds cross-node safety
+- Redis lock (`wallet-lock:{walletId}`) adds cross-node safety
 - Two debits against balance `150` for `100` => one success, one failed
+
+## Why This Locking Strategy
+- I use **DB row-level locking** as the source of truth for correctness because balance consistency must be guaranteed at commit time.
+- I add a **Redis distributed lock** to reduce cross-instance contention and duplicate in-flight work in horizontally scaled deployments.
+- This layered approach gives:
+  - strong consistency from MySQL transaction + `FOR UPDATE`
+  - better coordination/performance across multiple app nodes from Redis
+  - safe behavior even if one layer degrades (DB lock still protects final correctness)
 
 ## Injection Prevention
 - TypeORM repository/query-builder parameterized operations only
@@ -77,6 +99,16 @@ npm run start:dev
 - Mass assignment prevented via strict DTOs
 - Standardized error response via global exception filter
 - Sensitive data (password hash) never returned
+
+### OWASP Mapping (Explicit)
+| OWASP API Risk | Mitigation in this project |
+|---|---|
+| API1: Broken Object Level Authorization (BOLA) | Wallet/transaction queries are scoped by JWT `sub`; admin-only access uses `RolesGuard` + `@Roles(UserRole.ADMIN)` |
+| API2: Broken Authentication | JWT bearer auth + password hashing (bcrypt) + access/refresh token separation |
+| API3: Broken Object Property Level Authorization / Mass Assignment | Strict DTO validation + `ValidationPipe` (`whitelist`, `forbidNonWhitelisted`) prevents client-controlled sensitive fields |
+| API4: Unrestricted Resource Consumption | `@nestjs/throttler` global limit and stricter route limits on auth and transaction endpoints |
+| API8: Security Misconfiguration | Centralized config, disabled ORM auto-sync in runtime path, structured global error filter |
+| API10: Unsafe Consumption of APIs / Injection Risks | TypeORM parameterized queries + validated input + no raw unsafe SQL in transaction flow |
 
 ## Production Changes
 - Use strong secret manager for JWT keys

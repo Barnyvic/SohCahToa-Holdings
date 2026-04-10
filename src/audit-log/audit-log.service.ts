@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { AuditAction } from './audit-actions.enum';
 import { AuditLog } from './audit-log.entity';
 
 @Injectable()
@@ -11,7 +12,7 @@ export class AuditLogService {
   ) {}
 
   async create(
-    action: string,
+    action: AuditAction,
     actorUserId: string | null,
     metadata: Record<string, unknown>,
   ): Promise<void> {

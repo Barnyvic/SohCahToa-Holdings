@@ -4,3 +4,4 @@ export * from './enums/user-role.enum';
 export * from './guards/roles.guard';
 export * from './filters/http-exception.filter';
 export * from './interceptors/success-response.interceptor';
+export * from './types/paginated.type';

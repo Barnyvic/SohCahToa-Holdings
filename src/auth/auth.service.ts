@@ -5,13 +5,14 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { StringValue } from 'ms';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { UserRole } from '../common/enums/user-role.enum';
 import { JwtPayload } from '../common/interfaces/jwt-payload.interface';
 import { User } from '../users/user.entity';
+import { UsersRepository } from '../users/users.repository';
 import { Wallet } from '../wallet/wallet.entity';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -23,7 +24,7 @@ export class AuthService {
   private readonly accessTtl: string;
   private readonly refreshTtl: string;
   constructor(
-    @InjectRepository(User) private readonly userRepository: Repository<User>,
+    private readonly usersRepository: UsersRepository,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
@@ -39,10 +40,7 @@ export class AuthService {
   async register(
     dto: RegisterDto,
   ): Promise<{ accessToken: string; refreshToken: string }> {
-    const existing = await this.userRepository
-      .createQueryBuilder('user')
-      .where('user.email = :email', { email: dto.email })
-      .getOne();
+    const existing = await this.usersRepository.findByEmail(dto.email);
     if (existing) {
       throw new ConflictException('Email already exists');
     }
@@ -70,9 +68,7 @@ export class AuthService {
   async login(
     dto: LoginDto,
   ): Promise<{ accessToken: string; refreshToken: string }> {
-    const user = await this.userRepository.findOne({
-      where: { email: dto.email },
-    });
+    const user = await this.usersRepository.findByEmail(dto.email);
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
     const matches = await bcrypt.compare(dto.password, user.passwordHash);
@@ -93,9 +89,7 @@ export class AuthService {
     if (payload.tokenType !== 'refresh')
       throw new UnauthorizedException('Invalid refresh token');
 
-    const user = await this.userRepository.findOne({
-      where: { id: payload.sub },
-    });
+    const user = await this.usersRepository.findById(payload.sub);
     if (!user) throw new UnauthorizedException('Invalid refresh token');
     return this.generateTokenPair(user);
   }
